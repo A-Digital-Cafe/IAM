@@ -259,6 +259,72 @@ export class PermissionManager implements IPermissionManager {
 		return max;
 	}
 
+	/**
+	 * Nombres de los roles vigentes del usuario en un contexto (vacío si no tiene ninguno).
+	 *
+	 * Espeja **exactamente** los tres niveles de rol de {@link resolvePermissions} —membresía de
+	 * la org, roles directos y roles de los grupos del contexto— con sus mismos predicados. No
+	 * reusa `#roleAppliesInContext` (el de {@link getMaxHierarchy}) porque ese aplica un filtro de
+	 * contexto al rol de grupo que la resolución de permisos NO aplica: un rol global colgado de
+	 * un grupo de la org concede permisos y quedaba fuera de esta lista, así que el gate de acceso
+	 * de los módulos UI rebotaba a alguien que los endpoints sí autorizan.
+	 *
+	 * La invariante que sostiene: un rol aparece acá si y sólo si aporta permisos en este
+	 * contexto. Cualquier cambio en los niveles de arriba tiene que replicarse acá.
+	 */
+	async resolveRoleNames(userId: string, orgId?: string): Promise<string[]> {
+		const user = await this.#findUser(userId);
+		if (!user) return [];
+
+		const validGroups = await this.#contextGroups(user, orgId);
+		const orgMembership = orgId ? user.orgMemberships?.find((m: OrgMembership) => m.orgId === orgId) : null;
+		const rolesMap = await this.#rolesById([
+			...(user.roleIds || []),
+			...(orgMembership?.roleIds || []),
+			...validGroups.flatMap((group) => group.roleIds || []),
+		]);
+
+		const names = new Set<string>();
+
+		// Nivel "groupRole": el grupo ya está filtrado por contexto; el rol no se vuelve a filtrar.
+		for (const group of validGroups) {
+			for (const roleId of group.roleIds || []) {
+				const role = rolesMap.get(roleId);
+				if (role) names.add(role.name);
+			}
+		}
+
+		// Nivel "userRole", rama de membresía de la organización.
+		if (orgId && orgMembership) {
+			for (const roleId of orgMembership.roleIds || []) {
+				const role = rolesMap.get(roleId);
+				if (role && (isMembershipRoleInContext(role, orgId) || isCrossOrgGlobalRole(role))) names.add(role.name);
+			}
+		}
+
+		// Nivel "userRole", rama de roles directos (+ SYSTEM/ADMIN globales, que aplican cross-org).
+		for (const roleId of user.roleIds || []) {
+			const role = rolesMap.get(roleId);
+			if (!role) continue;
+			if (isDirectRoleInContext(role, orgId) || (orgId && isCrossOrgGlobalRole(role))) names.add(role.name);
+		}
+
+		return [...names];
+	}
+
+	/**
+	 * Nombres distintos de TODOS los roles que existen (globales y de cualquier organización).
+	 *
+	 * Sólo para validar configuración —avisar de un `uiModule.access.roles` que nombra un rol
+	 * inexistente—, así que devuelve nombres y nada más: ni permisos, ni jerarquía, ni a quién
+	 * pertenecen. Sin filtro de contexto a propósito: un nombre declarado puede ser de un rol de
+	 * organización, y filtrar por contexto haría avisar de roles que sí existen.
+	 */
+	async listAllRoleNames(): Promise<string[]> {
+		const names = await this.roleModel.distinct("name");
+		return names.filter((name): name is string => typeof name === "string" && name.length > 0);
+	}
+
 	/** roleIds del usuario en el contexto: directos + membresía de la org + grupos del contexto. */
 	async #contextRoleIds(user: User, orgId?: string): Promise<Set<string>> {
 		const roleIds = new Set<string>(user.roleIds || []);

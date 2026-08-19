@@ -537,6 +537,34 @@ export default class SessionManagerService extends BaseService implements ISessi
 		};
 	}
 
+	/**
+	 * Roles vigentes del usuario en su contexto, por nombre. Delega en la resolución de identity
+	 * (mismos criterios de contexto que los permisos) y devuelve vacío si no está disponible:
+	 * quien decide con esto tiene que tratar "sin roles" como "no pasa".
+	 */
+	async resolveRoles(userId: string, orgId?: string): Promise<string[]> {
+		if (!this.#identityService) return [];
+		try {
+			return await this.#identityService.permissions.resolveRoleNames(userId, orgId);
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Nombres de todos los roles existentes (globales y de organización). Sirve para que quien
+	 * declare roles en configuración pueda avisar de un nombre que no existe; devuelve vacío si
+	 * identity no está disponible, y quien lo consuma tiene que tratar eso como "no sé".
+	 */
+	async listRoleNames(): Promise<string[]> {
+		if (!this.#identityService) return [];
+		try {
+			return await this.#identityService.permissions.listAllRoleNames();
+		} catch {
+			return [];
+		}
+	}
+
 	#hashPermissions(permissions: string[]): string {
 		return createHash("sha256")
 			.update([...permissions].sort((left, right) => left.localeCompare(right)).join("|"))

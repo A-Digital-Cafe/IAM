@@ -335,6 +335,7 @@ export class AuthEndpoints {
 			orgId: result.session.user.orgId,
 			orgSlug,
 			perms: sessionExtras.perms,
+			roles: sessionExtras.roles,
 			isAdmin: sessionExtras.isAdmin,
 			isOrgAdmin: sessionExtras.isOrgAdmin,
 			groupIds: sessionExtras.groupIds,
@@ -915,11 +916,12 @@ export class AuthEndpoints {
 	private static async buildSessionExtras(
 		userId: string,
 		orgId?: string
-	): Promise<{ avatar?: string; hasFreshUser: boolean; perms: Permission[]; isAdmin: boolean; isOrgAdmin: boolean; groupIds: string[] }> {
+	): Promise<{ avatar?: string; hasFreshUser: boolean; perms: Permission[]; roles: string[]; isAdmin: boolean; isOrgAdmin: boolean; groupIds: string[] }> {
 		const empty = {
 			avatar: undefined,
 			hasFreshUser: false,
 			perms: [] as Permission[],
+			roles: [] as string[],
 			isAdmin: false,
 			isOrgAdmin: false,
 			groupIds: [] as string[],
@@ -929,7 +931,11 @@ export class AuthEndpoints {
 		if (!identity || !internal) return empty;
 
 		try {
-			const [resolved, user] = await Promise.all([identity.permissions.resolvePermissions(userId, orgId), internal.users.getUser(userId)]);
+			const [resolved, roles, user] = await Promise.all([
+				identity.permissions.resolvePermissions(userId, orgId),
+				identity.permissions.resolveRoleNames(userId, orgId),
+				internal.users.getUser(userId),
+			]);
 
 			const perms: Permission[] = resolved.map((p) => ({ resource: p.resource, action: p.action, scope: p.scope }));
 
@@ -942,6 +948,7 @@ export class AuthEndpoints {
 				avatar: user ? resolveUserAvatar(user) : undefined,
 				hasFreshUser: Boolean(user),
 				perms,
+				roles,
 				isAdmin: !orgId && hasGlobalAdminRole,
 				isOrgAdmin,
 				groupIds: user?.groupIds ?? [],

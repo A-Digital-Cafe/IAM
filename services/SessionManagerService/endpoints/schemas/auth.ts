@@ -82,6 +82,7 @@ const SessionUser = Type.Object({
 	orgId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 	orgSlug: Type.Optional(Type.String()),
 	perms: Type.Unknown(),
+	roles: Type.Array(Type.String(), { description: "Nombres de los roles vigentes en el contexto" }),
 	isAdmin: Type.Boolean(),
 	isOrgAdmin: Type.Boolean(),
 	groupIds: Type.Array(Type.String()),
