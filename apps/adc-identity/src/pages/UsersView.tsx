@@ -40,6 +40,8 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 	const [pageIndex, setPageIndex] = useState(1);
 	const [total, setTotal] = useState(0);
 	const [searchQuery, setSearchQuery] = useState("");
+	const [sortBy, setSortBy] = useState<"username" | "email" | "lastLogin">("username");
+	const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 	// Sólo el primer fetch muestra skeleton: los cambios de página/búsqueda mantienen la tabla montada.
 	const [initialLoading, setInitialLoading] = useState(true);
 	const [modalOpen, setModalOpen] = useState(false);
@@ -129,7 +131,7 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 
 	const loadData = useCallback(async () => {
 		const q = searchQuery.trim().length >= 2 ? searchQuery.trim() : undefined;
-		const usersRes = await identityApi.listUsers({ orgId, q, limit: PAGE_SIZE, offset: (pageIndex - 1) * PAGE_SIZE });
+		const usersRes = await identityApi.listUsers({ orgId, q, limit: PAGE_SIZE, offset: (pageIndex - 1) * PAGE_SIZE, sortBy, sortDir });
 
 		if (usersRes.success && usersRes.data) {
 			const items = usersRes.data.users ?? [];
@@ -140,7 +142,7 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 			if (items.length === 0 && pageIndex > 1) setPageIndex(pageIndex - 1);
 		}
 		setInitialLoading(false);
-	}, [orgId, pageIndex, searchQuery]);
+	}, [orgId, pageIndex, searchQuery, sortBy, sortDir]);
 
 	useEffect(() => {
 		loadData();
@@ -148,6 +150,16 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 
 	const handleSearch = (query: string) => {
 		setSearchQuery(query);
+		setPageIndex(1);
+	};
+
+	const handleSortChange = (key: string) => {
+		if (sortBy === key) {
+			setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+		} else {
+			setSortBy(key as typeof sortBy);
+			setSortDir("asc");
+		}
 		setPageIndex(1);
 	};
 
@@ -288,8 +300,8 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 	};
 
 	const columns: Column<ClientUser>[] = [
-		{ key: "username", label: t("users.username") },
-		{ key: "email", label: t("users.email"), render: (u) => u.email || "—" },
+		{ key: "username", label: t("users.username"), sortable: true },
+		{ key: "email", label: t("users.email"), sortable: true, render: (u) => u.email || "—" },
 		{
 			key: "roleIds",
 			label: t("users.roles"),
@@ -357,7 +369,12 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 		{
 			key: "lastLogin",
 			label: t("users.lastLogin"),
-			render: (u) => (u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "—"),
+			sortable: true,
+			render: (u) => {
+				if (!u.lastLogin) return "—";
+				const d = new Date(u.lastLogin);
+				return <span title={d.toLocaleString()}>{d.toLocaleDateString()}</span>;
+			},
 		},
 	];
 
@@ -374,6 +391,9 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 				searchDebounce={300}
 				searchPlaceholder={t("users.searchPlaceholder")}
 				onSearch={handleSearch}
+				sortKey={sortBy}
+				sortDir={sortDir}
+				onSortChange={handleSortChange}
 				onAdd={writable ? openCreateModal : undefined}
 				addLabel={t("users.addUser")}
 				keyExtractor={(u) => u.id}

@@ -268,7 +268,9 @@ export class UserEndpoints {
 		const offset = Number(ctx.query?.offset) || undefined;
 		const rawQ = typeof ctx.query?.q === "string" ? ctx.query.q.trim() : "";
 		const q = rawQ.length >= 2 ? rawQ : undefined;
-		const { items: users, total } = await UserEndpoints.identity.users.getAllUsers(ctx.token!, orgId, { limit, offset, q });
+		const sortBy = ctx.query?.sortBy as string | undefined;
+		const sortDir = ctx.query?.sortDir as "asc" | "desc" | undefined;
+		const { items: users, total } = await UserEndpoints.identity.users.getAllUsers(ctx.token!, orgId, { limit, offset, q, sortBy, sortDir });
 
 		// Recoger todos los roleIds referenciados por los usuarios (incluidos orgMemberships)
 		const roleIdSet = new Set<string>();

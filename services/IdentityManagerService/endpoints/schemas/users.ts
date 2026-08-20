@@ -61,6 +61,10 @@ export const ListUsersQuery = Type.Object({
 	q: Type.Optional(Type.String({ description: "Filtro por username/email (mín. 2 caracteres; busca sobre toda la colección)" })),
 	limit: Type.Optional(Type.String({ pattern: String.raw`^\d+$`, description: "Tamaño de página (se clampa a 500)" })),
 	offset: Type.Optional(Type.String({ pattern: String.raw`^\d+$`, description: "Desplazamiento (para paginar)" })),
+	sortBy: Type.Optional(
+		Type.Union([Type.Literal("username"), Type.Literal("email"), Type.Literal("lastLogin")], { description: "Campo de orden (default: username)" })
+	),
+	sortDir: Type.Optional(Type.Union([Type.Literal("asc"), Type.Literal("desc")], { description: "Dirección de orden (default: asc)" })),
 });
 
 export const SearchUsersQuery = Type.Object({

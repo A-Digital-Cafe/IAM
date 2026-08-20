@@ -36,6 +36,8 @@ const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_SEARCH_LIMIT = 50;
 /** Máximo duro de un listado de usuarios (una respuesta sin límite es un DoS accidental). */
 const MAX_LIST_LIMIT = 500;
+/** Campos ordenables de `getAllUsers` (whitelist: `sortBy` no puede colarse tal cual a `.sort()`). */
+const SORTABLE_USER_FIELDS = new Set(["username", "email", "lastLogin"]);
 
 /** Corta a propósito: el token viaja a una casilla todavía NO verificada. */
 const EMAIL_CHANGE_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -1093,7 +1095,7 @@ export class UserManager implements IUserManagerInternal {
 	async getAllUsers(
 		token?: string,
 		orgId?: string,
-		opts: { limit?: number; offset?: number; q?: string } = {}
+		opts: { limit?: number; offset?: number; q?: string; sortBy?: string; sortDir?: "asc" | "desc" } = {}
 	): Promise<{ items: User[]; total: number }> {
 		await this.#permissionChecker.requirePermission(token, CRUDXAction.READ, IdentityScopes.USERS, orgId);
 
@@ -1105,8 +1107,15 @@ export class UserManager implements IUserManagerInternal {
 			}
 			const limit = Math.min(Math.max(opts.limit ?? MAX_LIST_LIMIT, 1), MAX_LIST_LIMIT);
 			const offset = Math.max(opts.offset ?? 0, 0);
+			// Whitelist: `sortBy` no puede colarse tal cual a `.sort()` de Mongo.
+			const sortField = SORTABLE_USER_FIELDS.has(opts.sortBy ?? "") ? (opts.sortBy as string) : "username";
+			const sortOrder = opts.sortDir === "desc" ? -1 : 1;
 			const [docs, total] = await Promise.all([
-				this.userModel.find(filter).sort({ username: 1 }).skip(offset).limit(limit),
+				this.userModel
+					.find(filter)
+					.sort({ [sortField]: sortOrder })
+					.skip(offset)
+					.limit(limit),
 				this.userModel.countDocuments(filter),
 			]);
 			return { items: docs.map((d: any) => d.toObject?.() || d), total };

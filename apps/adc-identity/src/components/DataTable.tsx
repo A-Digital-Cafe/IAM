@@ -27,6 +27,16 @@ interface DataTableProps<T> {
 	readonly onPageChange?: (page: number) => void;
 	/** Debounce (ms) del buscador; útil cuando `onSearch` dispara requests al server. */
 	readonly searchDebounce?: number;
+	/** Ordenamiento server-side: `key` de la columna actualmente ordenada. */
+	readonly sortKey?: string;
+	readonly sortDir?: "asc" | "desc";
+	/** Click en un header ordenable (`Column.sortable`). El padre decide el toggle asc/desc. */
+	readonly onSortChange?: (key: string) => void;
+}
+
+function sortIndicator(colKey: string, sortKey: string | undefined, sortDir: "asc" | "desc" | undefined): React.ReactNode {
+	if (sortKey !== colKey) return <span className="opacity-30">⇅</span>;
+	return sortDir === "asc" ? "▲" : "▼";
 }
 
 export function DataTable<T>({
@@ -45,6 +55,9 @@ export function DataTable<T>({
 	page,
 	onPageChange,
 	searchDebounce,
+	sortKey,
+	sortDir,
+	onSortChange,
 }: DataTableProps<T>) {
 	const { t } = useTranslation({ namespace: "adc-identity", autoLoad: true });
 	const [currentPage, setCurrentPage] = useState(1);
@@ -117,11 +130,24 @@ export function DataTable<T>({
 				<table className="w-full min-w-160 text-sm">
 					<thead>
 						<tr className="bg-header border-b border-accent/20">
-							{columns.map((col) => (
-								<th key={col.key} className="px-4 py-3 text-left font-heading font-semibold text-text whitespace-nowrap">
-									{col.label}
-								</th>
-							))}
+							{columns.map((col) =>
+								col.sortable && onSortChange ? (
+									<th key={col.key} className="px-4 py-3 text-left font-heading font-semibold text-text whitespace-nowrap">
+										<button
+											type="button"
+											className="flex items-center gap-1 cursor-pointer hover:text-primary transition-colors"
+											onClick={() => onSortChange(col.key)}
+										>
+											{col.label}
+											<span className="text-xs">{sortIndicator(col.key, sortKey, sortDir)}</span>
+										</button>
+									</th>
+								) : (
+									<th key={col.key} className="px-4 py-3 text-left font-heading font-semibold text-text whitespace-nowrap">
+										{col.label}
+									</th>
+								)
+							)}
 							{actions && <th className="px-4 py-3 text-right font-heading font-semibold text-text">{t("common.actions")}</th>}
 						</tr>
 					</thead>
