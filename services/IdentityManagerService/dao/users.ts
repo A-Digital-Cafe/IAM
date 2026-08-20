@@ -24,7 +24,12 @@ import { UNLIMITED } from "@common/types/plans/index.ts";
 import { IdentityError } from "@common/types/custom-errors/IdentityError.ts";
 import { AuthError } from "@common/types/custom-errors/AuthError.ts";
 import type { SeatGate } from "@common/types/plans/consumers.js";
-import type { IUserManagerInternal, UserAuthenticationResult } from "@common/types/identity/managers.ts";
+import type {
+	IUserManagerInternal,
+	LegalAcceptanceCounts,
+	LegalAcceptanceQuery,
+	UserAuthenticationResult,
+} from "@common/types/identity/managers.ts";
 
 export type { UserAuthenticationResult };
 
@@ -1192,6 +1197,55 @@ export class UserManager implements IUserManagerInternal {
 			// Un `metadata` con basura no puede romper la cuenta: se ignora la fila.
 			if (typeof row._id === "string" && row._id) out[row._id] = row.count;
 		}
+		return out;
+	}
+
+	/**
+	 * Cuántas cuentas cubren la versión vigente de los documentos que se aceptan.
+	 *
+	 * Un `$group` por combinación (baja programada × aceptó × entró después de la vigencia) devuelve
+	 * a lo sumo ocho filas y se tallan acá: la alternativa —listar cuentas para contarlas— traería
+	 * datos personales a una pantalla que sólo necesita porcentajes.
+	 *
+	 * `pendingSeen` es la señal que no existía en ningún lado: quien inició sesión después de
+	 * `effectiveFrom` vio el gate de re-aceptación sí o sí, así que seguir pendiente es una decisión
+	 * y no un olvido. Se compara por string porque las versiones son fechas ISO y ordenan igual.
+	 */
+	async countLegalAcceptance(query: LegalAcceptanceQuery, token?: string): Promise<LegalAcceptanceCounts> {
+		await this.#permissionChecker.requirePermission(token, CRUDXAction.READ, IdentityScopes.USERS);
+
+		const effective = new Date(`${query.effectiveFrom}T00:00:00.000Z`);
+		const rows = await this.userModel.aggregate<{ _id: { deleting: boolean; accepted: boolean; seen: boolean }; count: number }>([
+			{ $match: { isActive: { $ne: false } } },
+			{
+				$group: {
+					_id: {
+						deleting: { $ne: [{ $ifNull: ["$metadata.deletionReason", null] }, null] },
+						accepted: {
+							$and: [
+								{ $gte: [{ $ifNull: ["$metadata.legalAcceptance.termsVersion", ""] }, query.termsVersion] },
+								{ $gte: [{ $ifNull: ["$metadata.legalAcceptance.privacyVersion", ""] }, query.privacyVersion] },
+							],
+						},
+						seen: { $gte: [{ $ifNull: ["$lastLogin", new Date(0)] }, effective] },
+					},
+					count: { $sum: 1 },
+				},
+			},
+		]);
+
+		const out: LegalAcceptanceCounts = { total: 0, accepted: 0, pending: 0, pendingSeen: 0, pendingDormant: 0, deleting: 0 };
+		for (const row of rows) {
+			if (row._id?.deleting) {
+				out.deleting += row.count;
+				continue;
+			}
+			out.total += row.count;
+			if (row._id?.accepted) out.accepted += row.count;
+			else if (row._id?.seen) out.pendingSeen += row.count;
+			else out.pendingDormant += row.count;
+		}
+		out.pending = out.pendingSeen + out.pendingDormant;
 		return out;
 	}
 

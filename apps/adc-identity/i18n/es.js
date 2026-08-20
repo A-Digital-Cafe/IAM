@@ -270,6 +270,7 @@ export default {
 			audit: "Auditoría",
 			audit_log: "Registro de auditoría (datos personales)",
 			breach: "Incidentes de datos personales",
+			legal: "Documentos legales",
 		},
 		modules: {
 			runtime: "Runtime (start/stop)",

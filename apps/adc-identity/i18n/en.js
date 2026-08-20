@@ -269,6 +269,7 @@ export default {
 			audit: "Audit",
 			audit_log: "Audit log (personal data)",
 			breach: "Personal-data incidents",
+			legal: "Legal documents",
 		},
 		modules: {
 			runtime: "Runtime (start/stop)",

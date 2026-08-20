@@ -22,8 +22,6 @@ import { GeoIPValidator } from "./domain/security/GeoIPValidator.js";
 import { SessionManager } from "./domain/session/manager.js";
 import { OAuthProviderRegistry, PlatformAuthProvider } from "./domain/oauth/index.js";
 import { resolveUserAvatar } from "@common/utils/avatar.ts";
-import { LEGAL_DOCUMENTS, MIN_LEGAL_NOTICE_DAYS, currentLegalVersions, legalNoticeDays, type LegalDocument } from "@common/utils/legal-docs.js";
-import { PLATFORM_TOPICS } from "@common/utils/notifications/platform-topics.js";
 import { openPermissions, sealPermissions } from "./domain/security/perm-cache.js";
 
 // Endpoints (singleton)
@@ -54,11 +52,6 @@ interface SessionManagerConfig {
 const ACCESS_COOKIE_NAME = "access_token";
 const IS_DEV = process.env.NODE_ENV !== "production";
 const PERMISSION_FINGERPRINT_TTL_SECONDS = 60;
-/**
- * Espera antes de chequear los documentos legales: `NotificationService` arranca después que este
- * servicio (kernelMode 80 contra 70), así que anunciar en `start()` descartaría el aviso.
- */
-const LEGAL_CHECK_DELAY_MS = 30_000;
 
 /**
  * SessionManagerService - Orquestador de autenticación y sesiones
@@ -90,7 +83,6 @@ export default class SessionManagerService extends BaseService implements ISessi
 	#geoValidator: GeoIPValidator | null = null;
 	#sessionManager: SessionManager | null = null;
 	#oauthRegistry: OAuthProviderRegistry | null = null;
-	#legalCheckTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Configuración (overrides opcionales vía config.json → private; defaults por entorno)
 	get #defaultRedirectUrl(): string {
@@ -149,8 +141,6 @@ export default class SessionManagerService extends BaseService implements ISessi
 		await this.#initDomainComponents();
 
 		this.logger.logOk(`SessionManagerService iniciado${this.#redis ? " con Redis" : ""}`);
-
-		this.#legalCheckTimer = setTimeout(() => void this.#checkLegalDocsVersion(), LEGAL_CHECK_DELAY_MS);
 	}
 
 	/**
@@ -161,126 +151,6 @@ export default class SessionManagerService extends BaseService implements ISessi
 		const ops = this.tryGetMyService<IOperationsService>("OperationsService");
 		if (ops) await ops.withLeadership(name, ttlSeconds, fn);
 		else await fn();
-	}
-
-	/**
-	 * El chequeo corre a los 30s de CADA arranque, así que un despliegue de N nodos lo dispara N
-	 * veces casi a la vez y el lease-por-turno es lo que serializa el `get`/`set` de la marca: los
-	 * que llegan después leen la versión ya sellada y no vuelven a anunciar. El `broadcastId`
-	 * determinista sigue siendo la segunda red, para el caso de arranques bien separados.
-	 */
-	async #checkLegalDocsVersion(): Promise<void> {
-		await this.#onlyOnLeader("session.legal-version-check", 600, () => this.#legalDocsVersionBatch());
-	}
-
-	/**
-	 * Detecta el despliegue de una versión nueva de CUALQUIER documento legal versionado y la
-	 * anuncia. Este servicio es el que valida la aceptación, así que es el que sabe qué versión está
-	 * vigente; el aviso existe para que publicar el documento y comunicarlo no dependan de
-	 * acordarse. Los informativos (cookies, DPA) entran igual —Privacidad §7 y DPA §15 prometen el
-	 * mismo preaviso de ≥{@link MIN_LEGAL_NOTICE_DAYS} días—, sólo que sin exigir re-aceptación.
-	 *
-	 * La marca de "ya avisado" vive en Redis y no en Mongo a propósito: no vale un modelo nuevo
-	 * para un par de strings, y el peor caso de perder la clave es un aviso repetido —que para un
-	 * cambio legal es el lado seguro del error—. Sin Redis, no avisa: best-effort, nunca rompe el
-	 * arranque.
-	 */
-	async #legalDocsVersionBatch(): Promise<void> {
-		if (!this.#redis || !this.#identityService) return;
-		const docs: readonly LegalDocument[] = Object.values(LEGAL_DOCUMENTS);
-		const current: Record<string, string> = Object.fromEntries(docs.map((doc) => [doc.id, doc.version]));
-		try {
-			const key = "legal:announced-versions";
-			const raw = await this.#redis.get(key);
-			// La clave la escribe sólo este método, así que un JSON.parse directo alcanza: si viniera
-			// corrupta, el catch de abajo la trata como "no avisar" y el siguiente arranque la resella.
-			const previous = raw ? this.#parseAnnouncedVersions(raw) : null;
-
-			// Primer arranque con la clave vacía: sellar sin avisar. Si no, cada Redis nuevo
-			// dispararía una alerta por un cambio que no ocurrió.
-			if (!previous || Object.keys(previous).length === 0) {
-				await this.#redis.set(key, JSON.stringify(current));
-				return;
-			}
-
-			// Un documento visto por primera vez se sella sin anunciar, igual que el primer arranque:
-			// sólo anuncia un CAMBIO de versión respecto de lo ya sellado.
-			const changed = docs.filter((doc) => previous[doc.id] && previous[doc.id] !== doc.version);
-			if (changed.length === 0) {
-				if (raw !== JSON.stringify(current)) await this.#redis.set(key, JSON.stringify(current));
-				return;
-			}
-
-			// Sellar sólo si el aviso salió: si se descartó, el próximo arranque lo reintenta. Un
-			// aviso repetido lo deduplica `NotificationService`; uno perdido no lo recupera nadie.
-			if (await this.#announceLegalDocs(changed)) await this.#redis.set(key, JSON.stringify(current));
-			else this.logger.logWarn("[SessionManager] Cambio de documentos legales sin anunciar: se reintenta en el próximo arranque");
-		} catch (err: any) {
-			this.logger.logWarn(`Chequeo de versión de documentos legales falló: ${err?.message || err}`);
-		}
-	}
-
-	/**
-	 * Versiones ya anunciadas, tolerando el formato viejo (`{termsVersion, privacyVersion}`): sin
-	 * esta compatibilidad, el primer arranque tras ampliar el anunciador trataría a terms/privacy
-	 * como "nunca vistos" y sellaría sin detectar un cambio desplegado en esa misma ventana.
-	 */
-	#parseAnnouncedVersions(raw: string): Record<string, string> {
-		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		const out: Record<string, string> = {};
-		if (typeof parsed.termsVersion === "string") out.terms = parsed.termsVersion;
-		if (typeof parsed.privacyVersion === "string") out.privacy = parsed.privacyVersion;
-		for (const [id, version] of Object.entries(parsed)) {
-			if (typeof version === "string" && id in LEGAL_DOCUMENTS) out[id] = version;
-		}
-		return out;
-	}
-
-	/**
-	 * Anuncia el cambio a TODAS las personas usuarias (`platform.legal`, canal in-app no
-	 * silenciable) y al equipo. El aviso sale al desplegar la versión nueva y dice desde cuándo
-	 * rige: eso es lo que hace cierto el preaviso de los Términos, porque la re-aceptación no se
-	 * pide hasta `effectiveFrom`. Un `effectiveFrom` demasiado cerca de la publicación deja el
-	 * compromiso incumplido, así que se loguea como error en vez de pasar en silencio.
-	 *
-	 * `broadcastId` es determinista (documento + versión) y no un UUID: si el aviso se reintenta
-	 * —clave de Redis perdida, redeploy— el dedup de `NotificationService` evita la doble entrega.
-	 *
-	 * @returns `false` si el anuncio a las personas usuarias se descartó (sin subsistema de
-	 * notificaciones): el caller no debe dar el cambio por avisado.
-	 */
-	async #announceLegalDocs(changed: LegalDocument[]): Promise<boolean> {
-		for (const doc of changed) {
-			const days = legalNoticeDays(doc);
-			if (days < MIN_LEGAL_NOTICE_DAYS) {
-				this.logger.logError(
-					`[SessionManager] ${doc.label} ${doc.version} rige desde ${doc.effectiveFrom}: ${days} día(s) de preaviso, menos de los ${MIN_LEGAL_NOTICE_DAYS} comprometidos en los Términos`
-				);
-			}
-		}
-
-		const detail = changed.map((doc) => `${doc.label} (rige desde el ${doc.effectiveFrom})`).join(" y ");
-		// Los informativos se anuncian igual, pero sin prometer una re-aceptación que nunca se pide.
-		const requiresAcceptance = changed.some((doc) => doc.requiresAcceptance);
-		const mode = await this.emitBroadcast({
-			broadcastId: `legal:${changed.map((doc) => `${doc.id}@${doc.version}`).join("+")}`,
-			topic: PLATFORM_TOPICS.legal.topic,
-			title: "Actualizamos nuestros documentos legales",
-			body: requiresAcceptance
-				? `Cambió: ${detail}. Podés leer el texto nuevo ahora; a partir de esa fecha te vamos a pedir que lo aceptes para seguir usando la plataforma.`
-				: `Cambió: ${detail}. Podés leer el texto nuevo ahora; rige desde esa fecha, sin necesidad de volver a aceptar nada.`,
-			link: changed[0].href,
-			// Ruta de la app `help`: que la resuelva el cliente según entorno en vez de clavar un dominio.
-			linkApp: "help",
-			data: { changed: changed.map((doc) => ({ id: doc.id, version: doc.version, effectiveFrom: doc.effectiveFrom })) },
-		});
-
-		await this.#identityService?.notifications(this.getCapability()).legalDocsUpdated({
-			changed: changed.map((doc) => doc.label),
-			...currentLegalVersions(),
-		});
-		this.logger.logInfo(`[SessionManager] Documentos legales actualizados (${changed.map((doc) => doc.label).join(", ")}): anuncio ${mode}`);
-		return mode !== "dropped";
 	}
 
 	async #initDomainComponents(): Promise<void> {
@@ -865,8 +735,6 @@ export default class SessionManagerService extends BaseService implements ISessi
 		this.#refreshTokenRepo?.stop();
 		this.#loginTracker?.stop();
 		this.#sessionManager?.stop();
-		if (this.#legalCheckTimer) clearTimeout(this.#legalCheckTimer);
-		this.#legalCheckTimer = null;
 
 		this.#keyStore = null;
 		this.#tokenService = null;
