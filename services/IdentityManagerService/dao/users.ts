@@ -1111,11 +1111,7 @@ export class UserManager implements IUserManagerInternal {
 			const sortField = SORTABLE_USER_FIELDS.has(opts.sortBy ?? "") ? (opts.sortBy as string) : "username";
 			const sortOrder = opts.sortDir === "desc" ? -1 : 1;
 			const [docs, total] = await Promise.all([
-				this.userModel
-					.find(filter)
-					.sort({ [sortField]: sortOrder })
-					.skip(offset)
-					.limit(limit),
+				this.#getUsersPage(filter, sortField, sortOrder, offset, limit),
 				this.userModel.countDocuments(filter),
 			]);
 			return { items: docs.map((d: any) => d.toObject?.() || d), total };
@@ -1123,6 +1119,31 @@ export class UserManager implements IUserManagerInternal {
 			this.logger.logError(`Error obteniendo usuarios: ${error}`);
 			return { items: [], total: 0 };
 		}
+	}
+
+	/**
+	 * Página del listado admin. Desempata SIEMPRE por `username` (único): sobre cientos de claves
+	 * iguales, `skip`/`limit` sin desempate repite o saltea filas entre páginas.
+	 *
+	 * Para las columnas opcionales (`email`, `lastLogin`) va por `aggregate` en vez de `find`: la
+	 * mayoría de las cuentas no las tienen y Mongo ordena los nulos PRIMERO, así que ascendente
+	 * devolvía una pantalla entera de vacíos y se leía como que el orden no se aplicaba. La bandera
+	 * de "vacío" es un campo calculado, y eso sólo existe en el pipeline.
+	 */
+	async #getUsersPage(filter: Record<string, unknown>, field: string, order: 1 | -1, offset: number, limit: number): Promise<unknown[]> {
+		if (field === "username") {
+			return this.userModel.find(filter).sort({ username: order }).skip(offset).limit(limit);
+		}
+
+		return this.userModel.aggregate([
+			{ $match: filter },
+			// `$ifNull` cubre ausente/null y el `""` de un email en blanco con el mismo criterio.
+			{ $addFields: { __empty: { $cond: [{ $eq: [{ $ifNull: [`$${field}`, ""] }, ""] }, 1, 0] } } },
+			{ $sort: { __empty: 1, [field]: order, username: 1 } },
+			{ $skip: offset },
+			{ $limit: limit },
+			{ $project: { __empty: 0 } },
+		]);
 	}
 
 	/**

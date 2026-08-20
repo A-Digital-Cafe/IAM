@@ -22,6 +22,9 @@ const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,32}$/;
 /** Tamaño de página del listado (server-side: el endpoint devuelve la página + total). */
 const PAGE_SIZE = 10;
 
+/** Una fecha se abre por lo más reciente; el resto alfabético. Sólo el primer click de la columna. */
+const DEFAULT_SORT_DIR: Record<string, "asc" | "desc"> = { lastLogin: "desc" };
+
 interface UsersViewProps {
 	readonly perms: Permission[];
 	readonly orgId?: string;
@@ -158,7 +161,7 @@ export function UsersView({ perms, orgId, isAdmin, isScopedOrgView = false, orga
 			setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
 		} else {
 			setSortBy(key as typeof sortBy);
-			setSortDir("asc");
+			setSortDir(DEFAULT_SORT_DIR[key] ?? "asc");
 		}
 		setPageIndex(1);
 	};
