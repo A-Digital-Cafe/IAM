@@ -38,6 +38,13 @@ const MAX_SEARCH_LIMIT = 50;
 const MAX_LIST_LIMIT = 500;
 /** Campos ordenables de `getAllUsers` (whitelist: `sortBy` no puede colarse tal cual a `.sort()`). */
 const SORTABLE_USER_FIELDS = new Set(["username", "email", "lastLogin"]);
+/**
+ * Orden alfabético de humano. Por defecto Mongo compara bytes, así que TODAS las mayúsculas
+ * caen antes que las minúsculas (`Mara0` antes que `abbytec`). Fuerza 2 = ignora mayúsculas
+ * pero respeta tildes. Tiene que coincidir EXACTO con la collation del índice `username_ci`
+ * (ver `domain/user.ts`): si difieren, el sort se degrada en silencio a scan completo.
+ */
+const LIST_COLLATION = { locale: "es", strength: 2 };
 
 /** Corta a propósito: el token viaja a una casilla todavía NO verificada. */
 const EMAIL_CHANGE_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -1122,8 +1129,8 @@ export class UserManager implements IUserManagerInternal {
 	}
 
 	/**
-	 * Página del listado admin. Desempata SIEMPRE por `username` (único): sobre cientos de claves
-	 * iguales, `skip`/`limit` sin desempate repite o saltea filas entre páginas.
+	 * Página del listado admin. Desempata SIEMPRE hasta `id`: sobre claves repetidas (y con la
+	 * collation, `Ana` y `ana` empatan) `skip`/`limit` repite o saltea filas entre páginas.
 	 *
 	 * Para las columnas opcionales (`email`, `lastLogin`) va por `aggregate` en vez de `find`: la
 	 * mayoría de las cuentas no las tienen y Mongo ordena los nulos PRIMERO, así que ascendente
@@ -1132,18 +1139,27 @@ export class UserManager implements IUserManagerInternal {
 	 */
 	async #getUsersPage(filter: Record<string, unknown>, field: string, order: 1 | -1, offset: number, limit: number): Promise<unknown[]> {
 		if (field === "username") {
-			return this.userModel.find(filter).sort({ username: order }).skip(offset).limit(limit);
+			// `id` desempata en la misma dirección: así descendente es un recorrido inverso del
+			// índice `username_ci` en vez de un sort en memoria (ver `domain/user.ts`).
+			return this.userModel
+				.find(filter)
+				.sort({ username: order, id: order })
+				.collation(LIST_COLLATION)
+				.skip(offset)
+				.limit(limit);
 		}
 
-		return this.userModel.aggregate([
-			{ $match: filter },
-			// `$ifNull` cubre ausente/null y el `""` de un email en blanco con el mismo criterio.
-			{ $addFields: { __empty: { $cond: [{ $eq: [{ $ifNull: [`$${field}`, ""] }, ""] }, 1, 0] } } },
-			{ $sort: { __empty: 1, [field]: order, username: 1 } },
-			{ $skip: offset },
-			{ $limit: limit },
-			{ $project: { __empty: 0 } },
-		]);
+		return this.userModel
+			.aggregate([
+				{ $match: filter },
+				// `$ifNull` cubre ausente/null y el `""` de un email en blanco con el mismo criterio.
+				{ $addFields: { __empty: { $cond: [{ $eq: [{ $ifNull: [`$${field}`, ""] }, ""] }, 1, 0] } } },
+				{ $sort: { __empty: 1, [field]: order, username: 1, id: 1 } },
+				{ $skip: offset },
+				{ $limit: limit },
+				{ $project: { __empty: 0 } },
+			])
+			.collation(LIST_COLLATION);
 	}
 
 	/**

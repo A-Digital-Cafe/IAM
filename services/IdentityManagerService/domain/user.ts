@@ -43,6 +43,20 @@ export const userSchema = new Schema<User>(
 );
 
 /**
+ * Orden alfabético del listado admin: Mongo sólo usa un índice para ordenar si la collation de la
+ * consulta coincide con la del índice, así que el `unique` binario de `username` no sirve para el
+ * orden case-insensitive. Nombre propio obligatorio: no se permiten dos índices con la misma clave
+ * que difieran sólo en la collation.
+ *
+ * Compuesto con `id` porque el DAO desempata por ahí: un índice de un solo campo NO sirve para un
+ * sort de dos. Y el DAO desempata en la MISMA dirección (`id: order`) para que descendente sea un
+ * recorrido inverso de este índice; con direcciones mixtas (`{username:-1, id:1}`) tampoco aplica.
+ * Mantener en sync con `LIST_COLLATION` y el `sort` del DAO: si dejan de coincidir no falla nada,
+ * se degrada en silencio a scan completo + sort en memoria.
+ */
+userSchema.index({ username: 1, id: 1 }, { name: "username_ci", collation: { locale: "es", strength: 2 } });
+
+/**
  * Campos que el update genérico (`UserManager.updateUser`) puede escribir, vía `buildUpdateSet`.
  *
  * `passwordHash` y `lastLogin` quedan FUERA a propósito: tienen sus propios flujos. `id` y
