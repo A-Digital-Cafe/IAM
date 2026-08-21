@@ -26,7 +26,9 @@ import { EMAIL_CHANGE_TOKEN_TTL_MINUTES } from "../emails.js";
  * |                             | vía `/me/change-username` (cooldown 30 días) y   |
  * |                             | `/me/change-email` (confirmación en casilla nueva) |
  * | `roleIds`, `groupIds`       | sólo los del contexto del caller               |
- * | `metadata`                  | libre (datos por aplicación)                   |
+ * | `metadata`                  | sólo el TITULAR, y sólo los campos de perfil   |
+ * |                             | (`PATCH /me`); el PUT admin no la toca          |
+ * | `linkedAccounts`            | nadie por API; las escribe el vínculo OAuth    |
  * | `orgMemberships`            | org admin: `roleIds` de su propia membresía;   |
  * |                             | admin global: irrestricto                      |
  */
@@ -151,6 +153,13 @@ async function validateImmutableFields(
  * meses; acá es inmediato y 1 por día, pero acotado: la agregación toca todos los servicios.
  */
 const EXPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Campos de `metadata` que el titular escribe desde "Datos del perfil". Es una allowlist porque
+ * `updateOwnMetadata` mergea lo que reciba, y ahí adentro viven `accountTier`, `bannedAt`,
+ * `legalAcceptance` y la baja programada.
+ */
+const SELF_PROFILE_FIELDS = ["name", "lastName", "birthDate"] as const;
 
 /** Mismo formato de email que exige el alta (`validateRegisterBody` de SessionManagerService). */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
@@ -374,6 +383,56 @@ export class UserEndpoints {
 		const nextPrefs = { ...currentPrefs, ...patch };
 		const updated = await UserEndpoints.identity.users.updateOwnMetadata(ctx.user.id, { preferences: nextPrefs }, ctx.token!);
 		return { preferences: (updated.metadata?.preferences as Record<string, unknown>) ?? {} };
+	}
+
+	/**
+	 * Perfil propio. Va por acá y no por `PUT /users/:userId`: ese endpoint es el de GESTIÓN
+	 * —permiso `users.update` + jerarquía de roles, que justamente prohíbe operar sobre uno
+	 * mismo—, así que el titular editando sus propios datos rebotaba con `CANNOT_MODIFY_SELF`.
+	 */
+	@RegisterEndpoint({
+		method: "PATCH",
+		url: "/api/identity/users/me",
+		deferAuth: true,
+		options: {
+			tag: "IdentityManagerService/Users",
+			summary: "Actualiza los datos de perfil propios",
+			description:
+				"Edita `name`, `lastName` y `birthDate` de la cuenta propia (merge sobre la metadata; cadena vacía borra el campo). " +
+				"No toca la identidad ni el estado de la cuenta: `username` y `email` tienen sus propios flujos con " +
+				"re-autenticación (`/me/change-username`, `/me/change-email`), y roles/permisos son gestión administrativa.",
+			rateLimit: { max: 20, timeWindow: 60_000 },
+			schema: { body: US.ProfileBody, response: { 200: US.UserResponse } },
+		},
+	})
+	static async patchMyProfile(ctx: EndpointCtx<Record<string, string>, Record<string, unknown>>) {
+		if (!ctx.user) throw new AuthError(401, "UNAUTHORIZED", "No hay usuario autenticado");
+		const body = ctx.data ?? {};
+		if (typeof body !== "object" || Array.isArray(body)) {
+			throw new IdentityError(400, "INVALID_BODY", "El body debe ser un objeto plano");
+		}
+
+		const patch: Record<string, string> = {};
+		for (const field of SELF_PROFILE_FIELDS) {
+			const value = body[field];
+			if (value === undefined) continue;
+			if (typeof value !== "string") throw new IdentityError(400, "INVALID_FIELD", `${field} debe ser texto`);
+			patch[field] = value.trim();
+		}
+		if (patch.birthDate) {
+			// Fecha civil, sin hora ni zona: `YYYY-MM-DD` y que exista de verdad (`2025-02-31` no).
+			const [y, m, d] = patch.birthDate.split("-").map(Number);
+			const parsed = /^\d{4}-\d{2}-\d{2}$/.test(patch.birthDate) ? new Date(Date.UTC(y, m - 1, d)) : null;
+			if (!parsed || parsed.getUTCMonth() + 1 !== m || parsed.getUTCDate() !== d || parsed.getTime() > Date.now()) {
+				throw new IdentityError(400, "INVALID_FIELD", "birthDate tiene que ser una fecha pasada en formato YYYY-MM-DD");
+			}
+		}
+		if (Object.keys(patch).length === 0) {
+			throw new IdentityError(400, "MISSING_FIELDS", "No hay campos de perfil para actualizar");
+		}
+
+		const updated = await UserEndpoints.identity.users.updateOwnMetadata(ctx.user.id, patch, ctx.token!);
+		return sanitizeUserForContext(updated, ctx.user.orgId);
 	}
 
 	@RegisterEndpoint({
@@ -815,9 +874,16 @@ export class UserEndpoints {
 			currentUser.permissions
 		);
 
-		// Prevent updating sensitive fields via API
+		// Prevent updating sensitive fields via API. `metadata` y `linkedAccounts` están en
+		// USER_UPDATABLE_FIELDS —los usan flujos internos— pero por HTTP no entran: el $set pisa el
+		// objeto ENTERO, así que un PUT con metadata borraría de un saque el avatar, el tier, la baja
+		// programada y las aceptaciones legales del target; y escribir linkedAccounts es enchufarle a
+		// una cuenta ajena un proveedor OAuth propio, o sea entrar con ella. El perfil propio va por
+		// `PATCH /users/me`, y el vínculo OAuth por su propio flujo.
 		delete (updates as any).passwordHash;
 		delete (updates as any).id;
+		delete (updates as any).metadata;
+		delete (updates as any).linkedAccounts;
 
 		// Validar que los roleIds asignados sean del contexto correcto; los roles
 		// AGREGADOS deben ser de jerarquía menor a la del actor (quitar roles altos

@@ -127,6 +127,19 @@ export const UpdateUserBody = Type.Partial(
 	})
 );
 
+/**
+ * Datos de perfil que el TITULAR edita por su cuenta (`PATCH /users/me`). Sólo estos tres campos:
+ * el resto de la metadata (tier, baja programada, aceptaciones legales…) no es editable a mano.
+ * Cadena vacía = borrar el dato.
+ */
+export const ProfileBody = Type.Partial(
+	Type.Object({
+		name: Type.String({ maxLength: 80, description: "Nombre de pila" }),
+		lastName: Type.String({ maxLength: 80, description: "Apellido" }),
+		birthDate: Type.String({ maxLength: 10, description: "Fecha de nacimiento en formato `YYYY-MM-DD`" }),
+	})
+);
+
 /** Preferencias del usuario: objeto plano arbitrario (merge superficial). */
 export const PreferencesBody = Type.Record(Type.String(), Type.Unknown(), {
 	description: "Objeto plano de preferencias (se hace merge superficial)",

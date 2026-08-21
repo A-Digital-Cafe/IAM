@@ -261,6 +261,9 @@ export class OrgEndpoints {
 	})
 	static async removeOrgMember(ctx: EndpointCtx<{ orgId: string; userId: string }>) {
 		requireGlobalAccess(ctx);
+		// Misma jerarquía que el alta: sacar a alguien de su organización le quita los roles de esa
+		// membresía, así que es gestionarlo. Sin esto, quitar era la mitad barata de `addOrgMember`.
+		await assertCanManageUser(OrgEndpoints.identity.permissions, ctx.user?.id, ctx.params.userId, ctx.user?.orgId);
 		await OrgEndpoints.identity.users.removeOrgMembership(ctx.params.userId, ctx.params.orgId, ctx.token!);
 		OrgEndpoints.identity.permissions.invalidateUser(ctx.params.userId);
 		return { success: true };

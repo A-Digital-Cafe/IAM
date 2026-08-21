@@ -4,7 +4,7 @@ Servicio kernel (`kernelMode: 60`) para identidad: usuarios, roles, grupos y org
 
 - Persistencia MongoDB (`object/mongo`); contraseñas con argon2id (`Bun.password`, m=64 MiB/t=2). El formato PBKDF2 anterior se sigue leyendo siempre y se rehashea al iniciar sesión (una cuenta dormida nunca migra)
 - Permisos granulares recurso/acción/alcance (`PermissionChecker`); recursos `globalOnly` (security, modules) sólo valen desde **roles globales**
-- **Jerarquía de roles** (mayor = más autoridad): nadie gestiona usuarios/roles de jerarquía ≥ a la propia ni a sí mismo (`domain/hierarchy.ts`)
+- **Jerarquía de roles** (mayor = más autoridad): nadie gestiona usuarios/roles de jerarquía ≥ a la propia ni a sí mismo (`domain/hierarchy.ts`). Lo propio no pasa por los endpoints de gestión: va por `/users/me/*` (perfil, preferencias, avatar, 2FA, password, email, username)
 - Roles predefinidos **sincronizados en boot** desde `defaults/systemRoles.ts` (la matriz rol × permisos vive ahí)
 - `createAuthVerifier()` para validar tokens desde otros servicios; alertas `security.alert` a Admins/Security Managers globales (`notify.ts`)
 - Avatares vía `internal-s3-provider` + `attachments-utility`; auto-avatar SVG por semilla desde `common/public/avatars` (`@common/utils/avatar.ts`), sin red ni terceros
