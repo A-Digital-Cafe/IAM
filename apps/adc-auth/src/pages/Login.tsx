@@ -180,6 +180,7 @@ export function Login({ onNavigateToRegister, returnUrl }: LoginProps) {
 						<adc-input
 							inputId="password"
 							type="password"
+							revealToggle
 							value={password}
 							required
 							autocomplete="current-password"
@@ -222,6 +223,7 @@ export function Login({ onNavigateToRegister, returnUrl }: LoginProps) {
 						</a>
 						<a
 							href={getOAuthUrl("google")}
+							// ui-check-ignore: los colores del botón de Google los fija su guía de marca, no nuestro tema.
 							className="flex items-center gap-2 px-4 py-2 bg-white text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all"
 						>
 							<svg width="20" height="20" viewBox="0 0 24 24">

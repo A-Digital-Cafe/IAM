@@ -64,7 +64,7 @@ export function DeleteUserModal({ user, orgId, onClose, onDeleted }: DeleteUserM
 					/>
 					<span className="text-sm text-text">
 						{t("users.deleteImmediate")}
-						<span className="block text-xs text-danger mt-0.5">{t("users.deleteImmediateWarning")}</span>
+						<span className="block text-xs text-tdanger mt-0.5">{t("users.deleteImmediateWarning")}</span>
 					</span>
 				</label>
 			)}

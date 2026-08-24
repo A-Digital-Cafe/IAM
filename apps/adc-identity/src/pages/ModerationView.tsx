@@ -228,7 +228,7 @@ export function ModerationView({ perms }: ModerationViewProps) {
 							<adc-input type="datetime-local" value={formExpiresAt} onInput={(e: any) => setFormExpiresAt(e.target.value)} />
 							<p className="text-xs text-muted mt-1">{t("moderation.permanentHint")}</p>
 						</div>
-						{formError && <p className="text-sm text-red-500">{formError}</p>}
+						{formError && <p className="text-sm text-tdanger">{formError}</p>}
 						<FormModalFooter onCancel={() => setModalOpen(false)} submitting={submitting} />
 					</form>
 				</adc-modal>

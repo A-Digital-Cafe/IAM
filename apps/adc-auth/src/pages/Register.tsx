@@ -29,9 +29,9 @@ function passwordStrength(password: string): 0 | 1 | 2 | 3 {
 
 /** Estilos + clave i18n por nivel de fuerza (1..3); 0 reutiliza el nivel débil. */
 const STRENGTH_META: Record<1 | 2 | 3, { bar: string; text: string; labelKey: string }> = {
-	1: { bar: "bg-danger", text: "text-danger", labelKey: "register.passwordWeak" },
-	2: { bar: "bg-warn", text: "text-warn", labelKey: "register.passwordMedium" },
-	3: { bar: "bg-success", text: "text-success", labelKey: "register.passwordStrong" },
+	1: { bar: "bg-danger", text: "text-tdanger", labelKey: "register.passwordWeak" },
+	2: { bar: "bg-warn", text: "text-twarn", labelKey: "register.passwordMedium" },
+	3: { bar: "bg-success", text: "text-tsuccess", labelKey: "register.passwordStrong" },
 };
 
 /** Errores específicos de formulario registro (se muestran inline como callout) */
@@ -236,6 +236,7 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 						<adc-input
 							inputId="password"
 							type="password"
+							revealToggle
 							value={password}
 							required
 							autocomplete="new-password"
@@ -267,6 +268,7 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 						<adc-input
 							inputId="confirmPassword"
 							type="password"
+							revealToggle
 							value={confirmPassword}
 							required
 							autocomplete="new-password"
@@ -362,6 +364,7 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 						</a>
 						<a
 							href={getOAuthUrl("google")}
+							// ui-check-ignore: los colores del botón de Google los fija su guía de marca, no nuestro tema.
 							className="flex items-center gap-2 px-4 py-2 bg-white text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all"
 						>
 							<svg width="20" height="20" viewBox="0 0 24 24">

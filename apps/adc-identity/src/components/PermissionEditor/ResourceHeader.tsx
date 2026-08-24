@@ -12,7 +12,7 @@ export function ResourceHeader({ resource, onRemove, disabled, t }: ResourceHead
 			{!disabled && (
 				<button
 					type="button"
-					className="text-[10px] text-tdanger hover:text-danger transition-colors cursor-pointer"
+					className="text-[10px] text-tdanger hover:underline transition-colors cursor-pointer"
 					onClick={() => onRemove(resource)}
 					title={t("permissions.removeResource")}
 				>

@@ -189,7 +189,7 @@ export function StorageView({ perms, orgId }: StorageViewProps) {
 				actions={
 					updatable
 						? (o) => (
-								<button type="button" className="text-xs text-danger hover:underline" onClick={() => setDeleteConfirm(o)}>
+								<button type="button" className="text-xs text-tdanger hover:underline" onClick={() => setDeleteConfirm(o)}>
 									{t("common.delete")}
 								</button>
 							)
@@ -261,7 +261,7 @@ export function StorageView({ perms, orgId }: StorageViewProps) {
 							)}
 						</div>
 					)}
-					{memberDefaultError && <p className="text-danger text-xs mt-2">{memberDefaultError}</p>}
+					{memberDefaultError && <p className="text-tdanger text-xs mt-2">{memberDefaultError}</p>}
 				</section>
 			)}
 
@@ -367,7 +367,7 @@ export function StorageView({ perms, orgId }: StorageViewProps) {
 								/>
 							</>
 						)}
-						{formError && <p className="text-danger text-xs">{formError}</p>}
+						{formError && <p className="text-tdanger text-xs">{formError}</p>}
 						<FormModalFooter submitting={submitting} onCancel={() => setModalOpen(false)} />
 					</form>
 				</adc-modal>
