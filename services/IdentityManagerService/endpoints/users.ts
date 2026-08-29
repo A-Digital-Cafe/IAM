@@ -213,13 +213,23 @@ export class UserEndpoints {
 		url: "/api/identity/users/username/:username",
 		options: {
 			tag: "IdentityManagerService/Users",
-			summary: "Comprueba si un username existe",
-			description: "Responde 200 si el usuario existe; 404 si no. No expone datos del usuario.",
+			summary: "Comprueba si un username está disponible",
+			description:
+				"Responde 404 si el nombre está libre y se puede usar; 200 si ya existe; 403 si está libre pero la " +
+				"política de nombres lo rechaza (reservado, bloqueado o con formato inválido). Sin cuerpo (HEAD): la " +
+				"respuesta es el código. No expone datos del usuario.",
 			schema: { params: US.UsernameParams },
 		},
 	})
 	static async checkUsername(ctx: EndpointCtx<{ username: string }>) {
 		const { username } = ctx.params;
+
+		// El motivo por el que un nombre no sirve se resuelve acá, en la consulta que el formulario ya
+		// hace mientras se tipea, y no gastando un intento del alta. No filtra nada nuevo: el registro
+		// devuelve exactamente los mismos rechazos, sólo que una vez enviado el formulario.
+		if (username.length < 3 || username.length > 30 || checkUsername(username)) {
+			throw new IdentityError(403, "FORBIDDEN_USERNAME", "Ese nombre de usuario no está disponible");
+		}
 
 		const exists = await UserEndpoints.identity.users.existUserByName(username);
 

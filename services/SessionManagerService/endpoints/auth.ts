@@ -5,12 +5,14 @@ import type { LoginAttemptTracker } from "../domain/security/LoginAttemptTracker
 import type { GeoIPValidator } from "../domain/security/GeoIPValidator.js";
 import type { IIdentityManagerService } from "@common/types/identity/IIdentityManagerService.js";
 import {
+	clientRateKey,
 	RegisterEndpoint,
 	UncommonResponse,
 	type EndpointCtx,
 	type SetCookie,
 	type ClearCookie,
 } from "@services/core/EndpointManagerService/index.js";
+import type RedisProvider from "@providers/queue/redis/index.js";
 import * as AS from "./schemas/auth.js";
 import { AuthError } from "@common/types/custom-errors/AuthError.ts";
 import { resolveUserAvatar } from "@common/utils/avatar.ts";
@@ -29,6 +31,18 @@ import { TwoFactorLoginEndpoints, type IssuedSession } from "./twofactor.js";
 const ACCESS_COOKIE_NAME = "access_token";
 const REFRESH_COOKIE_NAME = "refresh_token";
 
+/**
+ * Cuota de altas **efectivas** por red y por hora, separada del rate limit del borde.
+ *
+ * El límite del borde cuenta requests y se gasta con cualquier rechazo de validación; el recurso
+ * que hay que proteger no son los intentos, son las cuentas. Con los dos juntos, equivocarse
+ * tipeando sale barato (cae en el cupo ancho del borde) y crear cuentas en serie sigue costando
+ * caro, sin que un hogar detrás de un NAT pague por el error de una sola persona.
+ */
+const REGISTER_QUOTA_KEY = "register:created:";
+const REGISTER_QUOTA_MAX = 2;
+const REGISTER_QUOTA_TTL_SECONDS = 60 * 60;
+
 interface AuthEndpointsDeps {
 	keyStore: KeyStore;
 	tokenService: TokenService;
@@ -43,6 +57,8 @@ interface AuthEndpointsDeps {
 	changePasswordUrl: string | null;
 	logger: { logError: (msg: string) => void; logWarn: (msg: string) => void };
 	moderation: ModerationLookupService | null;
+	/** Cuota de altas efectivas por red. Sin Redis el alta no se limita más allá del borde. */
+	redis: RedisProvider | null;
 	/** Hook tras un login exitoso: detecta dispositivo/IP nuevo y notifica (best-effort). */
 	onLoginSuccess?: (userId: string, ip: string) => void;
 	/** Hook cuando se detecta reuso de un refresh token (posible robo) y se revoca su familia. */
@@ -212,7 +228,10 @@ export class AuthEndpoints {
 				"correo (o, si ya pertenece a otra cuenta, se avisa a su titular y la cuenta nueva queda sin email). " +
 				"**La respuesta es idéntica en ambos casos**: no informa si una dirección está registrada. Reglas de " +
 				"negocio adicionales en validateRegisterBody.",
-			rateLimit: { max: 2, timeWindow: 3_600_000 },
+			// Ancho a propósito: acá se paga cada INTENTO, y los rechazos de `validateRegisterBody`
+			// son errores de tipeo. El cupo de cuentas creadas lo aplica `consumeRegisterQuota`.
+			// El eje por navegador reparte este cupo entre los dispositivos de una misma casa.
+			rateLimit: { max: 20, timeWindow: 3_600_000, perDevice: { max: 5, timeWindow: 3_600_000 } },
 			// Validación declarativa (TypeBox): tipos/formatos antes del handler.
 			schema: { body: AS.RegisterBody, response: { 200: AS.RegisterResponse } },
 		},
@@ -239,6 +258,11 @@ export class AuthEndpoints {
 			if (await users.existUserByName(username)) {
 				throw new AuthError(409, "USERNAME_EXISTS", "El nombre de usuario ya está en uso");
 			}
+
+			// Última puerta antes de consumir el recurso caro. Va DESPUÉS del 409 de username (que es
+			// un error del formulario, no un alta) y ANTES de `createUser`, para que sólo cuenten las
+			// cuentas que realmente se crean.
+			await AuthEndpoints.consumeRegisterQuota(ctx.ip);
 
 			// La cuenta se crea SIN email: vincularlo acá obligaría a decir si ya estaba tomado. La
 			// constancia legal se sella en el servidor: qué versión de cada documento estaba vigente y
@@ -672,6 +696,40 @@ export class AuthEndpoints {
 			username: fullUser.username,
 			orgOptions,
 		});
+	}
+
+	/**
+	 * Suma una cuenta creada al contador de la red y rechaza con 429 al pasarse.
+	 *
+	 * Incrementa ANTES de crear (INCR atómico) en vez de leer-y-después-escribir: dos altas
+	 * simultáneas de la misma red leerían el mismo valor y las dos pasarían. El costo de hacerlo así
+	 * es que un fallo de `createUser` deja el intento contado; a esta altura ya pasó toda la
+	 * validación, así que eso sólo ocurre ante un error real del servidor y conviene que sea caro.
+	 *
+	 * Sin Redis no limita: es un servicio opcional y el rate limit del borde (que degrada a memoria)
+	 * sigue siendo el techo.
+	 */
+	private static async consumeRegisterQuota(ip: string): Promise<void> {
+		const redis = AuthEndpoints.deps.redis;
+		if (!redis) return;
+
+		let count: number;
+		try {
+			count = await redis.incrWithTtl(`${REGISTER_QUOTA_KEY}${clientRateKey(ip)}`, REGISTER_QUOTA_TTL_SECONDS);
+		} catch (err: any) {
+			// Redis caído no puede bloquear altas legítimas: el borde ya acota el abuso.
+			AuthEndpoints.deps.logger.logWarn(`Cuota de altas no aplicada (Redis): ${err?.message || err}`);
+			return;
+		}
+
+		if (count > REGISTER_QUOTA_MAX) {
+			throw new AuthError(
+				429,
+				"REGISTER_QUOTA_EXCEEDED",
+				"Ya se crearon varias cuentas desde esta conexión en la última hora. Probá de nuevo más tarde.",
+				{ retryAfter: REGISTER_QUOTA_TTL_SECONDS }
+			);
+		}
 	}
 
 	private static validateRegisterBody(body: RegisterBody | undefined): ValidRegisterBody {

@@ -10,8 +10,23 @@ import { LEGAL_DOCUMENTS, MIN_AGE } from "@common/utils/legal-docs.js";
 import { redirectToReturnUrl, sanitizeReturnUrl } from "../utils/safe-url.ts";
 import { LEGAL_LINKS, OAuthLegalNotice } from "../components/OAuthLegalNotice.tsx";
 
-/** Pattern de username válido: alfanumérico + _ . - entre 3 y 32 caracteres. */
-const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,32}$/;
+/**
+ * Formato de username, espejo de `USERNAME_FORMAT_RX` de `@common/utils/name-policy` (que no se
+ * puede importar acá: lee el JSON de política con `node:fs`). La longitud 3–30 y los puntos
+ * consecutivos se validan aparte, igual que en el servidor.
+ *
+ * Estaba en `{3,32}` y sin anclar el primer/último carácter, así que aceptaba nombres que el alta
+ * rechazaba después — y cada rechazo costaba un intento del rate limit.
+ */
+const USERNAME_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$/;
+
+/** Espejo del regex de `validateRegisterBody`: el `type="email"` del navegador es más permisivo. */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
+
+/** Formato válido (sin consultar al servidor). El resto de la política la responde el 403. */
+function hasValidUsernameFormat(username: string): boolean {
+	return username.length >= 3 && username.length <= 30 && !username.includes("..") && USERNAME_FORMAT.test(username);
+}
 
 /** Puntúa la fuerza de la contraseña: 0 = vacía, 1 = débil, 2 = media, 3 = fuerte. */
 function passwordStrength(password: string): 0 | 1 | 2 | 3 {
@@ -46,7 +61,15 @@ const REGISTER_SPECIFIC_ERROR_KEYS = [
 	{ key: "LEGAL_NOT_ACCEPTED", severity: "error" },
 	{ key: "AGE_NOT_CONFIRMED", severity: "error" },
 	{ key: "LEGAL_VERSION_MISMATCH", severity: "warning" },
+	{ key: "FORBIDDEN_USERNAME", severity: "error" },
+	// Los dos 429 del alta: el del borde (intentos por red/navegador) y la cuota de cuentas creadas.
+	// Como callout y no como toast: hay que poder leerlos sin que se vayan solos.
+	{ key: "RATE_LIMIT_EXCEEDED", severity: "warning" },
+	{ key: "REGISTER_QUOTA_EXCEEDED", severity: "warning" },
 ];
+
+/** Estados en los que el nombre no sirve: el botón queda bloqueado y no se gasta un intento. */
+const UNUSABLE_USERNAME_STATUS = new Set(["unavailable", "forbidden", "badFormat"]);
 
 /** Base URL for API calls */
 const API_BASE = getBaseUrl(3000);
@@ -63,7 +86,7 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [loading, setLoading] = useState(false);
-	const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "unavailable">("idle");
+	const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "unavailable" | "forbidden" | "badFormat">("idle");
 	const [acceptedTerms, setAcceptedTerms] = useState(false);
 	const [ageConfirmed, setAgeConfirmed] = useState(false);
 	/** Alta hecha: la dirección tipeada, para el aviso de "revisá tu casilla". */
@@ -73,8 +96,8 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 
 	const checkUsername = async (username: string) => {
 		// Validación estricta inline antes de consultar disponibilidad.
-		if (!USERNAME_PATTERN.test(username)) {
-			setUsernameStatus("idle");
+		if (!hasValidUsernameFormat(username)) {
+			setUsernameStatus("badFormat");
 			return;
 		}
 
@@ -84,6 +107,9 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 			if (!res) return; // abortada: una nueva petición decidirá el estado
 			if (res.status === 200) setUsernameStatus("unavailable");
 			else if (res.status === 404) setUsernameStatus("available");
+			// 403: libre, pero la política lo rechaza (reservado o bloqueado). Se avisa acá y no
+			// enviando el formulario, que costaría un intento del rate limit.
+			else if (res.status === 403) setUsernameStatus("forbidden");
 			else setUsernameStatus("idle");
 		} catch {
 			setUsernameStatus("idle");
@@ -106,6 +132,23 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 	const handleSubmit = async (e: React.SubmitEvent) => {
 		e.preventDefault();
 		clearErrors();
+
+		// Todo lo que el servidor rechaza con 400 y el cliente puede saber solo se corta acá: cada
+		// viaje evitado es un intento del rate limit que no se gasta.
+		if (!hasValidUsernameFormat(username)) {
+			showError({ errorKey: "INVALID_USERNAME", message: t("errors.INVALID_USERNAME") });
+			return;
+		}
+
+		if (usernameStatus === "forbidden") {
+			showError({ errorKey: "FORBIDDEN_USERNAME", message: t("errors.FORBIDDEN_USERNAME") });
+			return;
+		}
+
+		if (!EMAIL_PATTERN.test(email)) {
+			showError({ errorKey: "INVALID_EMAIL", message: t("errors.INVALID_EMAIL") });
+			return;
+		}
 
 		if (password !== confirmPassword) {
 			showError({ errorKey: "PASSWORDS_MISMATCH", message: t("errors.PASSWORDS_MISMATCH") });
@@ -154,6 +197,12 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 	const getOAuthUrl = (provider: string): string => {
 		return `${API_BASE}/api/auth/login/${provider}?returnUrl=${encodeURIComponent(sanitizeReturnUrl(returnUrl))}`;
 	};
+
+	/** Un solo mensaje para los tres motivos por los que el nombre no sirve. */
+	let usernameError: string | undefined;
+	if (usernameStatus === "unavailable") usernameError = t("register.usernameUnavailable");
+	else if (usernameStatus === "forbidden") usernameError = t("register.usernameForbidden");
+	else if (usernameStatus === "badFormat") usernameError = t("register.usernameBadFormat");
 
 	const strength = passwordStrength(password);
 	const strengthMeta = STRENGTH_META[strength === 0 ? 1 : strength];
@@ -209,7 +258,7 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 							placeholder={t("register.usernamePlaceholder", undefined, "tu_usuario")}
 							hint={usernameStatus === "checking" ? t("register.usernameChecking") : undefined}
 							success={usernameStatus === "available" ? t("register.usernameAvailable") : undefined}
-							error={usernameStatus === "unavailable" ? t("register.usernameUnavailable") : undefined}
+							error={usernameError}
 							onInput={(e) => setUsername((e.target as HTMLInputElement).value)}
 						/>
 					</div>
@@ -334,7 +383,7 @@ export function Register({ onNavigateToLogin, returnUrl }: RegisterProps) {
 						type="submit"
 						class="w-full flex justify-end mt-8"
 						loading={loading}
-						disabled={usernameStatus === "unavailable" || !acceptedTerms || !ageConfirmed}
+						disabled={UNUSABLE_USERNAME_STATUS.has(usernameStatus) || !acceptedTerms || !ageConfirmed}
 						variant="primary"
 					>
 						{loading ? t("register.submitting", undefined, "Creando cuenta...") : t("register.submit", undefined, "Crear Cuenta")}

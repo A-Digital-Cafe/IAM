@@ -243,6 +243,7 @@ export default class SessionManagerService extends BaseService implements ISessi
 				changePasswordUrl: this.#changePasswordUrl(),
 				logger: this.logger,
 				moderation: this.#moderation,
+				redis: this.#redis,
 				onLoginSuccess: (userId: string, ip: string) => void this.checkAndNotifyNewLoginIp(userId, ip),
 				// Aviso al usuario cuando se detecta reuso de un refresh token (posible robo) y se
 				// revoca su familia de sesiones. Mismo canal seguro que las sesiones revocadas.

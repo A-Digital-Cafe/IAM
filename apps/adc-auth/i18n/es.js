@@ -30,6 +30,8 @@ export default {
 		usernameChecking: "Verificando disponibilidad…",
 		usernameAvailable: "Nombre de usuario disponible",
 		usernameUnavailable: "Este nombre de usuario ya está en uso",
+		usernameForbidden: "Ese nombre de usuario no está disponible",
+		usernameBadFormat: "Entre 3 y 30 caracteres: letras, números, punto, guion y guion bajo, empezando y terminando en letra o número",
 		passwordStrengthLabel: "Seguridad de la contraseña",
 		passwordWeak: "Débil",
 		passwordMedium: "Media",
@@ -126,6 +128,10 @@ export default {
 		AGE_NOT_CONFIRMED: "Tenés que confirmar que cumplís con la edad mínima",
 		LEGAL_VERSION_MISMATCH: "Los Términos o la Política de Privacidad se actualizaron. Recargá la página para leer la versión vigente.",
 		PASSWORD_TOO_SHORT: "La contraseña debe tener al menos 8 caracteres",
+		FORBIDDEN_USERNAME: "Ese nombre de usuario no está disponible. Probá con otro.",
+		// Los dos 429 del alta. El mensaje del servidor trae la espera concreta y gana sobre esto.
+		RATE_LIMIT_EXCEEDED: "Demasiados intentos desde esta conexión. Esperá un rato y volvé a probar; el límite es por red, así que puede alcanzarte si alguien más la comparte.",
+		REGISTER_QUOTA_EXCEEDED: "Ya se crearon varias cuentas desde esta conexión en la última hora. Probá de nuevo más tarde.",
 		// Errores inesperados de auth (dominio)
 		AUTH_ERROR: "Error durante la autenticación",
 		AUTH_UNAVAILABLE: "Servicio de autenticación no disponible",
