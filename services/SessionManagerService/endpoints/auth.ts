@@ -56,7 +56,16 @@ interface AuthEndpointsDeps {
 	/** Destino de `/.well-known/change-password`. `null` = sin URL pública configurada. */
 	changePasswordUrl: string | null;
 	logger: { logError: (msg: string) => void; logWarn: (msg: string) => void };
-	moderation: ModerationLookupService | null;
+	/**
+	 * Resuelto por request y no una vez: el servicio se puede detener en caliente, y una referencia
+	 * cacheada dejaría de comprobar bans sin que nada avise.
+	 */
+	getModeration: () => ModerationLookupService | null;
+	/**
+	 * Rechazar el login si la moderación no está cargada (`AUTH_REQUIRE_BAN_ENFORCEMENT`).
+	 * Se resuelve al arrancar: leerlo por request pondría la configuración en el camino caliente.
+	 */
+	requireModeration: boolean;
 	/** Cuota de altas efectivas por red. Sin Redis el alta no se limita más allá del borde. */
 	redis: RedisProvider | null;
 	/** Hook tras un login exitoso: detecta dispositivo/IP nuevo y notifica (best-effort). */
@@ -151,17 +160,17 @@ export class AuthEndpoints {
 		const ipAddress = ctx.ip;
 
 		// Pre-check: IP baneada -> rechazar antes de revelar si las credenciales son válidas
-		await assertIpNotBanned(AuthEndpoints.deps.moderation, ipAddress);
+		await assertIpNotBanned(AuthEndpoints.deps.getModeration(), ipAddress, AuthEndpoints.deps.requireModeration);
 
 		try {
 			const profile = await AuthEndpoints.validateCredentials(username, password);
 			const fullUser = await resolveNativeLoginUser(profile, AuthEndpoints.deps.loginTracker, ipAddress);
 
 			// Post-credenciales: chequear ban por email
-			await assertEmailNotBanned(AuthEndpoints.deps.moderation, fullUser.email);
+			await assertEmailNotBanned(AuthEndpoints.deps.getModeration(), fullUser.email, AuthEndpoints.deps.requireModeration);
 
 			// Registrar IP de login exitoso (3h) para alimentar la ban-list anti-evasión
-			await recordLoginAttemptIp(AuthEndpoints.deps.moderation, fullUser.id, ipAddress, AuthEndpoints.deps.logger);
+			await recordLoginAttemptIp(AuthEndpoints.deps.getModeration(), fullUser.id, ipAddress, AuthEndpoints.deps.logger);
 			// Detección de dispositivo/IP nuevo → notificación de seguridad (fire-and-forget).
 			AuthEndpoints.deps.onLoginSuccess?.(fullUser.id, ipAddress);
 
@@ -239,7 +248,8 @@ export class AuthEndpoints {
 	static async handleRegister(ctx: EndpointCtx<Record<string, string>, RegisterBody>): Promise<unknown> {
 		const { username, email, password } = AuthEndpoints.validateRegisterBody(ctx.data);
 		await redirectIfRequestBanned({
-			moderation: AuthEndpoints.deps.moderation,
+			moderation: AuthEndpoints.deps.getModeration(),
+			required: AuthEndpoints.deps.requireModeration,
 			email,
 			ip: ctx.ip,
 			emailReason: "Email no permitido",

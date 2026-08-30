@@ -38,6 +38,7 @@ import { AUTH_APP_BASE } from "./utils/authApp.js";
 
 // Decoradores
 import { EnableEndpoints, DisableEndpoints } from "@services/core/EndpointManagerService/index.js";
+import { platformSetting } from "@common/utils/platform-settings.ts";
 
 /** Configuración custom del servicio (desde config.json + .env) */
 interface SessionManagerConfig {
@@ -110,6 +111,27 @@ export default class SessionManagerService extends BaseService implements ISessi
 	}
 
 	// Lifecycle
+
+	/**
+	 * El servicio de moderación, resuelto **en cada uso** y no una vez al arrancar.
+	 *
+	 * Tiene que ser perezoso porque se puede detener en caliente: deshabilitarlo desde el panel lo
+	 * carga igual (el orquestador es `kernelMode 75`, después de este servicio) y lo detiene a
+	 * continuación, así que una referencia tomada en `start()` sobrevive apuntando a un servicio
+	 * muerto — y los bans dejarían de comprobarse sin que ningún guard se entere.
+	 *
+	 * Es el mismo criterio que `IdentityManagerService.tryGetModerationService()`. El lookup en el
+	 * registro es O(1); la caché sólo evita rehacer el `_internal()`.
+	 */
+	#resolveModeration(): ModerationLookupService | null {
+		const mod = this.tryGetMyService<IModerationService>("ModerationService");
+		if (!mod) {
+			this.#moderation = null;
+			return null;
+		}
+		this.#moderation ??= mod._internal(this.getCapability());
+		return this.#moderation;
+	}
 
 	@EnableEndpoints({
 		managers: () => [AuthEndpoints, OAuthEndpoints, OidcEndpoints, SessionAdminEndpoints, LegalEndpoints, TwoFactorLoginEndpoints],
@@ -224,9 +246,15 @@ export default class SessionManagerService extends BaseService implements ISessi
 
 		// Inicializar singletons de endpoints. ModerationService es opcional: se tipa
 		// contra la interfaz de @common, nunca contra la clase concreta.
-		if (!this.#moderation) {
-			const mod = this.tryGetMyService<IModerationService>("ModerationService");
-			this.#moderation = mod ? mod._internal(this.getCapability()) : null;
+		// `ModerationService` viaja en este mismo preset, así que si falta con el login andando es un
+		// despliegue roto y no una configuración: por defecto el login se rechaza en vez de entrar sin
+		// comprobar bans.
+		const requireModeration = platformSetting("AUTH_REQUIRE_BAN_ENFORCEMENT") !== "false";
+		if (!this.#resolveModeration() && requireModeration) {
+			this.logger.logError(
+				"[auth] ModerationService no está cargado: los logins se van a rechazar con 503. " +
+					"Si este despliegue deliberadamente no tiene moderación, poné `AUTH_REQUIRE_BAN_ENFORCEMENT=false`."
+			);
 		}
 
 		AuthEndpoints.init(
@@ -242,7 +270,8 @@ export default class SessionManagerService extends BaseService implements ISessi
 				defaultRedirectUrl: this.#defaultRedirectUrl,
 				changePasswordUrl: this.#changePasswordUrl(),
 				logger: this.logger,
-				moderation: this.#moderation,
+				getModeration: () => this.#resolveModeration(),
+				requireModeration,
 				redis: this.#redis,
 				onLoginSuccess: (userId: string, ip: string) => void this.checkAndNotifyNewLoginIp(userId, ip),
 				// Aviso al usuario cuando se detecta reuso de un refresh token (posible robo) y se
@@ -316,7 +345,8 @@ export default class SessionManagerService extends BaseService implements ISessi
 			defaultRedirectUrl: this.#defaultRedirectUrl,
 			getProviderConfig: (provider: string) => this.#getProviderConfig(provider),
 			logger: this.logger,
-			moderation: this.#moderation,
+			getModeration: () => this.#resolveModeration(),
+			requireModeration,
 		});
 
 		await this.#initOidc();

@@ -76,7 +76,16 @@ interface OAuthEndpointsDeps {
 	defaultRedirectUrl: string;
 	getProviderConfig: (provider: string) => OAuthProviderConfig | null;
 	logger: { logError: (msg: string) => void; logWarn: (msg: string) => void };
-	moderation: ModerationLookupService | null;
+	/**
+	 * Resuelto por request y no una vez: el servicio se puede detener en caliente, y una referencia
+	 * cacheada dejaría de comprobar bans sin que nada avise.
+	 */
+	getModeration: () => ModerationLookupService | null;
+	/**
+	 * Rechazar el login si la moderación no está cargada (`AUTH_REQUIRE_BAN_ENFORCEMENT`).
+	 * Se resuelve al arrancar: leerlo por request pondría la configuración en el camino caliente.
+	 */
+	requireModeration: boolean;
 }
 
 interface ProviderParams {
@@ -225,7 +234,13 @@ export class OAuthEndpoints {
 			const profile = await oauthProvider.getUserProfile(tokens.accessToken);
 
 			// Anti-evasión: bloquear si el email OAuth está en la ban-list
-			await redirectIfRequestBanned({ moderation: OAuthEndpoints.deps.moderation, email: profile.email, ip: ctx.ip, clearCookies });
+			await redirectIfRequestBanned({
+				moderation: OAuthEndpoints.deps.getModeration(),
+				required: OAuthEndpoints.deps.requireModeration,
+				email: profile.email,
+				ip: ctx.ip,
+				clearCookies,
+			});
 
 			const result = await OAuthEndpoints.getOrCreateUser(provider, profile, tokens.accessToken);
 
@@ -241,7 +256,7 @@ export class OAuthEndpoints {
 			await OAuthEndpoints.redirectIfInactiveUser(user, clearCookies);
 
 			// Registrar IP del login OAuth (3h) para alimentar ban-list anti-evasión
-			await recordLoginAttemptIp(OAuthEndpoints.deps.moderation, user.id, ctx.ip, OAuthEndpoints.deps.logger);
+			await recordLoginAttemptIp(OAuthEndpoints.deps.getModeration(), user.id, ctx.ip, OAuthEndpoints.deps.logger);
 
 			await OAuthEndpoints.syncDiscordLogin(provider, tokens.accessToken, user, oauthProvider);
 

@@ -42,7 +42,7 @@ export function BanUserModal({ user, onClose, onBanned }: BanUserModalProps) {
 			<form onSubmit={handleSubmit} className="space-y-4">
 				<div>
 					<label className="block text-sm font-medium mb-1 text-text">{t("users.banReason")}</label>
-					<adc-input type="text" value={reason} required minlength={3} onInput={(e: any) => setReason(e.target.value)} />
+					<adc-input type="text" value={reason} required minLength={3} onInput={(e: any) => setReason(e.target.value)} />
 				</div>
 				<div>
 					<label className="block text-sm font-medium mb-1 text-text">{t("users.banExpiresAt")}</label>

@@ -203,7 +203,7 @@ export function TwoFactorChallenge({ returnUrl, initialMode, onNavigateToLogin }
 							required
 							// `one-time-code` habilita el autocompletado del código en iOS/Android.
 							autocomplete="one-time-code"
-							inputmode="numeric"
+							inputMode="numeric"
 							placeholder="000000"
 							onInput={(e) => setCode((e.target as HTMLInputElement).value)}
 						/>
