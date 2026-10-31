@@ -981,7 +981,7 @@ export class AuthEndpoints {
 	 * consultando IIdentityManagerService. Si no está disponible o falla la lectura, devuelve defaults
 	 * vacíos para no romper la respuesta de /session.
 	 */
-	private static async buildSessionExtras(
+	static async buildSessionExtras(
 		userId: string,
 		orgId?: string
 	): Promise<{ avatar?: string; hasFreshUser: boolean; perms: Permission[]; roles: string[]; isAdmin: boolean; isOrgAdmin: boolean; groupIds: string[] }> {

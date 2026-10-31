@@ -28,6 +28,8 @@ import { openPermissions, sealPermissions } from "./domain/security/perm-cache.j
 import { AuthEndpoints } from "./endpoints/auth.js";
 import { OAuthEndpoints } from "./endpoints/oauth.js";
 import { OidcEndpoints } from "./endpoints/oidc.js";
+import { IntrospectionEndpoints } from "./endpoints/introspection.js";
+import { readIntrospectionClients } from "./domain/introspection/clients.js";
 import { isOidcEnabled, readOidcConfig } from "./domain/oidc/clients.js";
 import { AuthorizationCodeStore } from "./domain/oidc/codes.js";
 import { OidcSigningKeys } from "./domain/oidc/SigningKeys.js";
@@ -134,7 +136,15 @@ export default class SessionManagerService extends BaseService implements ISessi
 	}
 
 	@EnableEndpoints({
-		managers: () => [AuthEndpoints, OAuthEndpoints, OidcEndpoints, SessionAdminEndpoints, LegalEndpoints, TwoFactorLoginEndpoints],
+		managers: () => [
+			AuthEndpoints,
+			OAuthEndpoints,
+			OidcEndpoints,
+			IntrospectionEndpoints,
+			SessionAdminEndpoints,
+			LegalEndpoints,
+			TwoFactorLoginEndpoints,
+		],
 	})
 	async start(kernelKey: symbol): Promise<void> {
 		await super.start(kernelKey);
@@ -286,6 +296,19 @@ export default class SessionManagerService extends BaseService implements ISessi
 			},
 			(username: string, password: string) => this.#validatePlatformCredentials(username, password)
 		);
+
+		const introspectionClients = readIntrospectionClients(
+			(this.config?.private?.introspection as { clients?: unknown } | undefined)?.clients,
+			this.logger
+		);
+		IntrospectionEndpoints.init({
+			clients: introspectionClients,
+			verify: (token) => this.verifyToken(token),
+			extras: (userId, orgId) => AuthEndpoints.buildSessionExtras(userId, orgId),
+		});
+		if (introspectionClients.length > 0) {
+			this.logger.logOk(`[introspect] introspección activa (clientes: ${introspectionClients.map((c) => c.clientId).join(", ")}).`);
+		}
 
 		SessionAdminEndpoints.init({
 			refreshTokenRepo: this.#refreshTokenRepo,

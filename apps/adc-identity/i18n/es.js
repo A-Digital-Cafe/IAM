@@ -293,6 +293,10 @@ export default {
 			overrides: "Excepciones de límites",
 			subscriptions: "Suscripciones y asientos",
 		},
+		sumi: {
+			chat: "Conversar",
+			trusted: "Fuente confiable",
+		},
 		toggleAll: "Alternar toda la columna",
 		toggleRow: "Alternar toda la fila",
 		addResource: "Agregar recurso",
@@ -334,6 +338,7 @@ export default {
 		security: "Seguridad (global)",
 		modules: "Módulos de plataforma (global)",
 		plans: "Planes y límites (global)",
+		sumi: "Sumi (global)",
 	},
 	errors: {
 		// Acceso / aislamiento de org

@@ -292,6 +292,10 @@ export default {
 			overrides: "Limit overrides",
 			subscriptions: "Subscriptions & seats",
 		},
+		sumi: {
+			chat: "Chat",
+			trusted: "Trusted source",
+		},
 		toggleAll: "Toggle entire column",
 		toggleRow: "Toggle entire row",
 		addResource: "Add resource",
@@ -333,6 +337,7 @@ export default {
 		security: "Security (global)",
 		modules: "Platform modules (global)",
 		plans: "Plans & limits (global)",
+		sumi: "Sumi (global)",
 	},
 	errors: {
 		// Access / org isolation

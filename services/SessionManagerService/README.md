@@ -17,6 +17,7 @@ Autenticación OAuth 2.0 con Access/Refresh Tokens y rotación de secretos (`ker
 | POST   | `/api/auth/login/2fa/enroll`                | público             | Alta obligatoria: entrega el secreto (sólo desafíos `enroll`)      |
 | POST   | `/api/auth/login/2fa/enroll/confirm`        | público             | Confirma el alta, emite la sesión y entrega los códigos            |
 | POST   | `/api/auth/logout`                          | público             | Cierra sesión                                                      |
+| POST   | `/api/auth/introspect`                      | cliente (Basic)     | Introspección RFC 7662 para backends externos (`ADC_INTROSPECTION_CLIENTS`) |
 | GET    | `/api/auth/legal/status`                    | sesión              | Documentos legales pendientes de re-aceptar (vacío = nada)         |
 | POST   | `/api/auth/legal/accept`                    | sesión              | Acepta la versión vigente (constancia `via: "re-acceptance"`)      |
 | GET    | `/api/auth/admin/users/:id/sessions`        | `security.sessions` | Lista sesiones activas del usuario (global-only, respeta jerarquía) |

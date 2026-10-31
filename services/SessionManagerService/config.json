@@ -16,6 +16,9 @@
 		"cookieDomain": "${SESSION_COOKIE_DOMAIN:-}",
 		"changePasswordUrl": "${SESSION_CHANGE_PASSWORD_URL:-}",
 		"defaultRedirectUrl": "${SESSION_DEFAULT_REDIRECT_URL:-}",
+		"introspection": {
+			"clients": "${ADC_INTROSPECTION_CLIENTS:-}"
+		},
 		"oidc": {
 			"issuer": "${ADC_OIDC_ISSUER:-}",
 			"tokenTtlSeconds": "${ADC_OIDC_TOKEN_TTL_SECONDS:-900}",
